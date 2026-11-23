@@ -1,0 +1,694 @@
+{
+  "id": "BrightPathLeaveV1",
+  "name": "BrightPath | Leave requests",
+  "description": "Repairs the provided Employees-sheet flow. Records validated requests as Pending; manager approval is required before balances change.",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Leave request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "brightpath-leave",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "http://localhost:8080"
+        }
+      },
+      "webhookId": "brightpath-leave",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "BrightPath Webhook Access"
+        }
+      },
+      "id": "bac681f2-b091-4299-b24a-d49fd1fa30e9",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Validate leave request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\ntry{const b=$json.body||{};const id=need(b.employeeId,'Employee ID',60),requestId=need(b.requestId,'Request ID',200),e=email(b.email);if(!/^[-\\w]{8,200}$/.test(requestId))throw Error('Invalid request ID');const start=isoDate(b.start),end=isoDate(b.end);if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(start)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(end)||!Number.isFinite(Date.parse(start))||!Number.isFinite(Date.parse(end))||end<start)throw Error('Valid leave dates are required');let days=0;for(let d=new Date(start+'T12:00:00Z');d<=new Date(end+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+1)){if(![5,6].includes(d.getUTCDay()))days++;if(days>15)throw Error('Longer leave requires HR review');}leaveDecision({days},{'Employee ID':id,'Remaining Leave':100});return [{json:{requestId,employeeId:id,email:e,start,end,days}}];}catch(e){return [{json:{status:400,body:{ok:false,error:'invalid_leave',message:e.message}}}];}"
+      },
+      "onError": "continueErrorOutput",
+      "id": "043eb996-1f9f-450a-9604-b9b9add6fbea",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Valid leave?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !$json.status }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "262b4b0f-6199-45a9-bb76-0f05880f970d",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Find employee",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Employees"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Employee ID",
+              "lookupValue": "={{ $json.employeeId }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "id": "cdbff40b-0a1d-4755-a7f4-ffc297196cdb",
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "name": "Check leave balance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\nconst r=$('Validate leave request').first().json;const rows=$input.all().map(x=>x.json).filter(e=>e['Employee ID']===r.employeeId);if(rows.length!==1||email(rows[0].Email)!==r.email)return [{json:{status:403,body:{ok:false,error:'employee_mismatch'}}}];const e=rows[0],d=leaveDecision(r,e);return [{json:{...r,name:e['Employee Name'],remaining:d.remaining,eligible:d.eligible}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "e192b43e-0ec2-4e3d-a9b9-f453ce9e52eb",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "name": "Employee verified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !$json.status }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f8d4c4a2-2ba8-4311-aca2-f4811ed5a182",
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "name": "Find previous leave request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leave Requests"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Request ID",
+              "lookupValue": "={{ $('Validate leave request').first().json.requestId }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "id": "3fb41a39-9581-4afe-a1b2-4311f9e2048d",
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "name": "Leave request state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const r=$('Check leave balance').first().json;const old=$input.all().find(x=>x.json['Request ID']===r.requestId);return [{json:{...r,exists:!!old}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "54614512-6725-4bc7-9bbb-ddff2514e40e",
+      "position": [
+        260,
+        260
+      ]
+    },
+    {
+      "name": "Already recorded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.exists }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b9b9bd32-9af8-4eb8-b23c-97af8084b8f9",
+      "position": [
+        520,
+        260
+      ]
+    },
+    {
+      "name": "Save pending leave request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leave Requests"
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Request ID": "={{ $json.requestId }}",
+            "Employee ID": "={{ $json.employeeId }}",
+            "Employee Name": "={{ $json.name }}",
+            "Email": "={{ $json.email }}",
+            "Request Date": "={{ $now.toISO() }}",
+            "Leave Start": "={{ $json.start }}",
+            "Leave End": "={{ $json.end }}",
+            "Days Requested": "={{ $json.days }}",
+            "Remaining Before": "={{ $json.remaining }}",
+            "Can Approve?": "={{ $json.eligible ? 'Balance sufficient; manager review required' : 'Insufficient balance' }}",
+            "Status": "Pending"
+          },
+          "schema": [
+            {
+              "id": "Request ID",
+              "displayName": "Request ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Employee ID",
+              "displayName": "Employee ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Employee Name",
+              "displayName": "Employee Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Request Date",
+              "displayName": "Request Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Leave Start",
+              "displayName": "Leave Start",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Leave End",
+              "displayName": "Leave End",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Days Requested",
+              "displayName": "Days Requested",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Remaining Before",
+              "displayName": "Remaining Before",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Can Approve?",
+              "displayName": "Can Approve?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput",
+      "id": "e7de9e5d-4712-4808-bff1-70b27d9d0512",
+      "position": [
+        780,
+        260
+      ]
+    },
+    {
+      "name": "Leave response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:202,body:{ok:true,status:'Pending',requestId:$('Validate leave request').first().json.requestId,message:'Your request is recorded for manager review. Leave is not approved yet.'}}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "28e8a575-9cd0-4860-9818-9a6c93b6157d",
+      "position": [
+        1040,
+        260
+      ]
+    },
+    {
+      "name": "Safe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:503,body:{ok:false,error:'service_unavailable',message:'The request could not be completed. Contact HR with this reference.',reference:$execution.id}}}];"
+      },
+      "id": "6249b0b6-14b4-43b8-a3a4-c6a9191808ad",
+      "position": [
+        1300,
+        260
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body ?? $json }}",
+        "options": {
+          "responseCode": "={{ $json.status ?? 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "X-Content-Type-Options",
+                "value": "nosniff"
+              }
+            ]
+          }
+        }
+      },
+      "id": "544d8ca6-59f2-4c23-8d4f-b6281ad8889d",
+      "position": [
+        0,
+        520
+      ]
+    },
+    {
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "### Leave requests\nRepairs the provided Employees-sheet flow. Records validated requests as Pending; manager approval is required before balances change.\nInactive until setup/config.json and credentials are configured. See HANDOVER.md.",
+        "width": 1450,
+        "height": 180,
+        "color": 7
+      },
+      "id": "77627942-a168-472c-99dd-27ec6ff8b103",
+      "position": [
+        0,
+        -220
+      ]
+    }
+  ],
+  "connections": {
+    "Leave request": {
+      "main": [
+        [
+          {
+            "node": "Validate leave request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate leave request": {
+      "main": [
+        [
+          {
+            "node": "Valid leave?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid leave?": {
+      "main": [
+        [
+          {
+            "node": "Find employee",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find employee": {
+      "main": [
+        [
+          {
+            "node": "Check leave balance",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check leave balance": {
+      "main": [
+        [
+          {
+            "node": "Employee verified?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Employee verified?": {
+      "main": [
+        [
+          {
+            "node": "Find previous leave request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find previous leave request": {
+      "main": [
+        [
+          {
+            "node": "Leave request state",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leave request state": {
+      "main": [
+        [
+          {
+            "node": "Already recorded?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already recorded?": {
+      "main": [
+        [
+          {
+            "node": "Leave response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save pending leave request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save pending leave request": {
+      "main": [
+        [
+          {
+            "node": "Leave response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Leave response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe failure": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "errorWorkflow": "BrightPathErrorsV1"
+  },
+  "tags": []
+}

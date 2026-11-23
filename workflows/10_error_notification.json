@@ -1,0 +1,133 @@
+{
+  "id": "BrightPathErrorsV1",
+  "name": "BrightPath | Automation error notification",
+  "description": "Operational alert for unexpected BrightPath workflow failures. Sends workflow name and execution reference, without CV text, request bodies or provider error messages.",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Unexpected workflow failure",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "parameters": {},
+      "id": "86e3ba8a-8356-468d-8c7b-c040f1937fe0",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { ...$json, config: {\"hrEmail\":\"CONFIGURE_HR_EMAIL\",\"jobsSheetId\":\"CONFIGURE_JOBS_SHEET_ID\",\"jobsTab\":\"Job Openings\",\"candidatesSheetId\":\"CONFIGURE_CANDIDATES_SHEET_ID\",\"candidatesTab\":\"Candidates\",\"cvRootFolderId\":\"CONFIGURE_CV_ROOT_FOLDER_ID\",\"applicationFormUrl\":\"CONFIGURE_APPLICATION_FORM_URL\",\"applicationJobEntry\":\"CONFIGURE_APPLICATION_JOB_ENTRY\",\"referralFormUrl\":\"CONFIGURE_REFERRAL_FORM_URL\",\"referralJobEntry\":\"CONFIGURE_REFERRAL_JOB_ENTRY\",\"portalOrigin\":\"http://localhost:8080\",\"qdrantUrl\":\"CONFIGURE_QDRANT_URL_MATCH_CREDENTIAL\",\"collection\":\"brightpath_handbook_v42_c88d0baabd49\",\"handbookFileId\":\"1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0\",\"handbookSha256\":\"c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6\",\"leaveSheetId\":\"1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54\"} } }}",
+        "options": {}
+      },
+      "id": "b30152d3-b597-4dca-b710-18ec9aec408d",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Sanitize failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const e=$json;if(!String(e.workflow?.name||'').startsWith('BrightPath |'))return [];if(!e.config.hrEmail||e.config.hrEmail.includes('CONFIGURE_'))throw Error('Configure HR notification mailbox');return [{json:{to:e.config.hrEmail,subject:'BrightPath automation needs attention',message:'Workflow: '+e.workflow.name+'\\nExecution reference: '+String(e.execution?.id||'unavailable')+'\\nCheck the n8n execution status and the Automation Queue. No applicant details are included in this alert.'}}];"
+      },
+      "id": "9af53434-4c86-4e21-8804-51e51d1c3cef",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Notify HR operator",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "cNwkVHIKnkzKW0O8",
+          "name": "Gmail account"
+        }
+      },
+      "id": "e151052a-af21-4dcf-8cb6-6c3b3c1fd8a4",
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "### Automation error notification\nOperational alert for unexpected BrightPath workflow failures. Sends workflow name and execution reference, without CV text, request bodies or provider error messages.\nInactive until setup/config.json and credentials are configured. See HANDOVER.md.",
+        "width": 1450,
+        "height": 180,
+        "color": 7
+      },
+      "id": "645f6c5e-2f45-4c1b-8d80-710de0c991c0",
+      "position": [
+        0,
+        -220
+      ]
+    }
+  ],
+  "connections": {
+    "Unexpected workflow failure": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Sanitize failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize failure": {
+      "main": [
+        [
+          {
+            "node": "Notify HR operator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false
+  },
+  "tags": []
+}

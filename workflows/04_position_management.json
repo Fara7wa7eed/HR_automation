@@ -1,0 +1,962 @@
+{
+  "id": "BrightPathPositionsV1",
+  "name": "BrightPath | Position management",
+  "description": "Trusted HR form relay opens/closes positions, creates CV folders and prefilled links, stores jobs and emails HR.",
+  "active": false,
+  "nodes": [
+    {
+      "name": "HR position request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "brightpath-positions",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "http://localhost:8080"
+        }
+      },
+      "webhookId": "brightpath-positions",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "BrightPath Webhook Access"
+        }
+      },
+      "id": "68877c25-bc24-4bda-bbcd-ef791bdee326",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { ...$json, config: {\"hrEmail\":\"CONFIGURE_HR_EMAIL\",\"jobsSheetId\":\"CONFIGURE_JOBS_SHEET_ID\",\"jobsTab\":\"Job Openings\",\"candidatesSheetId\":\"CONFIGURE_CANDIDATES_SHEET_ID\",\"candidatesTab\":\"Candidates\",\"cvRootFolderId\":\"CONFIGURE_CV_ROOT_FOLDER_ID\",\"applicationFormUrl\":\"CONFIGURE_APPLICATION_FORM_URL\",\"applicationJobEntry\":\"CONFIGURE_APPLICATION_JOB_ENTRY\",\"referralFormUrl\":\"CONFIGURE_REFERRAL_FORM_URL\",\"referralJobEntry\":\"CONFIGURE_REFERRAL_JOB_ENTRY\",\"portalOrigin\":\"http://localhost:8080\",\"qdrantUrl\":\"CONFIGURE_QDRANT_URL_MATCH_CREDENTIAL\",\"collection\":\"brightpath_handbook_v42_c88d0baabd49\",\"handbookFileId\":\"1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0\",\"handbookSha256\":\"c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6\",\"leaveSheetId\":\"1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54\"} } }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput",
+      "id": "f47a7db4-ea8c-4570-8012-06af6e5a06c3",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Validate HR action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\ntry{configured($json.config,['hrEmail','jobsSheetId','cvRootFolderId','applicationFormUrl','referralFormUrl','applicationJobEntry','referralJobEntry']);const b=$json.body||{};let r={requestId:need(b.requestId,'Request ID',200),action:b.action,config:$json.config};if(!/^[-\\w]{8,200}$/.test(r.requestId))throw Error('Invalid request ID');if(r.action==='Open'){r.jobId='JOB-'+r.requestId;r.title=need(b.title,'Job title',150);r.department=need(b.department,'Department',100);r.requiredSkills=need(b.requiredSkills,'Required skills',2000);r.niceSkills=text(b.niceSkills,2000);r.description=need(b.description,'Description',3000);r.minimumExperience=Number(b.minimumExperience);if(!Number.isFinite(r.minimumExperience)||r.minimumExperience<0||r.minimumExperience>50)throw Error('Invalid minimum experience');r.applyLink=prefill(r.config.applicationFormUrl,r.config.applicationJobEntry,r.jobId);r.referralLink=prefill(r.config.referralFormUrl,r.config.referralJobEntry,r.jobId);}else if(r.action==='Close'){r.jobId=need(b.jobId,'Job ID',220);r.reason=text(b.reason,500);}else throw Error('Action must be Open or Close');return [{json:r}];}catch(e){return [{json:{status:e.message.startsWith('Missing configuration')?503:400,body:{ok:false,error:'invalid_position_request',message:e.message}}}];}"
+      },
+      "onError": "continueErrorOutput",
+      "id": "8d2156f4-4412-444a-9a1b-b417f94c45a4",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Valid HR request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !$json.status }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d2123336-0f15-42be-ad49-281a415e0bd0",
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "name": "Find position",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_JOBS_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Job Openings"
+        },
+        "options": {},
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Job ID",
+              "lookupValue": "={{ $json.jobId }}"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "id": "03b93a10-8d20-410e-b9ed-324b1066c122",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "name": "Position state",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const req=$('Validate HR action').first().json;const rows=$input.all().map(x=>x.json).filter(j=>j['Job ID']===req.jobId);if(rows.length>1)throw Error('Duplicate Job IDs require HR correction');return [{json:{...req,existing:rows[0]||null}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "33a4f512-977c-49df-870e-4ed809842696",
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "name": "Open action?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ $json.action === 'Open' }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "264f2d39-0c56-4232-9abb-f8f29129c957",
+      "position": [
+        0,
+        260
+      ]
+    },
+    {
+      "name": "Already opened?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !!$json.existing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aa811116-09e7-4c06-91fe-3577fb24321b",
+      "position": [
+        260,
+        260
+      ]
+    },
+    {
+      "name": "Create job CV folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "parameters": {
+        "resource": "folder",
+        "operation": "create",
+        "name": "={{ $json.jobId }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_CV_ROOT_FOLDER_ID"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "ebIrklj2igUu7Oks",
+          "name": "Google Drive account"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "id": "2eb1d085-1a55-4e4c-a0ca-57d31234e077",
+      "position": [
+        520,
+        260
+      ]
+    },
+    {
+      "name": "Build job row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const r=$('Position state').first().json;return [{json:{'Job ID':r.jobId,'Job title':r.title,Department:r.department,'Required skills':r.requiredSkills,'Nice-to-have skills':r.niceSkills,'Minimum experience':r.minimumExperience,Description:r.description,Status:'Open','Apply link':r.applyLink,'Referral link':r.referralLink,'Created date':new Date().toISOString(),'CV folder ID':$json.id,'Request ID':r.requestId}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "f45e8d72-51a8-47de-b291-a8efff2116db",
+      "position": [
+        780,
+        260
+      ]
+    },
+    {
+      "name": "Save new position",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_JOBS_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Job Openings"
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Job ID": "={{ $json[\"Job ID\"] }}",
+            "Job title": "={{ $json[\"Job title\"] }}",
+            "Department": "={{ $json[\"Department\"] }}",
+            "Required skills": "={{ $json[\"Required skills\"] }}",
+            "Nice-to-have skills": "={{ $json[\"Nice-to-have skills\"] }}",
+            "Minimum experience": "={{ $json[\"Minimum experience\"] }}",
+            "Description": "={{ $json[\"Description\"] }}",
+            "Status": "={{ $json[\"Status\"] }}",
+            "Apply link": "={{ $json[\"Apply link\"] }}",
+            "Referral link": "={{ $json[\"Referral link\"] }}",
+            "Created date": "={{ $json[\"Created date\"] }}",
+            "CV folder ID": "={{ $json[\"CV folder ID\"] }}",
+            "Request ID": "={{ $json[\"Request ID\"] }}"
+          },
+          "schema": [
+            {
+              "id": "Job ID",
+              "displayName": "Job ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job title",
+              "displayName": "Job title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Department",
+              "displayName": "Department",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Required skills",
+              "displayName": "Required skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Nice-to-have skills",
+              "displayName": "Nice-to-have skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Minimum experience",
+              "displayName": "Minimum experience",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Description",
+              "displayName": "Description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Apply link",
+              "displayName": "Apply link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Referral link",
+              "displayName": "Referral link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Created date",
+              "displayName": "Created date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "CV folder ID",
+              "displayName": "CV folder ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Request ID",
+              "displayName": "Request ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput",
+      "id": "3eb2486d-0d2c-4057-829f-a28974223c67",
+      "position": [
+        1040,
+        260
+      ]
+    },
+    {
+      "name": "Existing close ID?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !!$json.existing }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "60d634df-9b06-42ba-a556-6102b2d5e4fc",
+      "position": [
+        1300,
+        260
+      ]
+    },
+    {
+      "name": "Close matching position",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_JOBS_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Job Openings"
+        },
+        "options": {
+          "cellFormat": "RAW"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Job ID": "={{ $('Position state').first().json.jobId }}",
+            "Status": "Closed",
+            "Close reason": "={{ $('Position state').first().json.reason }}"
+          },
+          "schema": [
+            {
+              "id": "Job ID",
+              "displayName": "Job ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Close reason",
+              "displayName": "Close reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "matchingColumns": [
+            "Job ID"
+          ]
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": false,
+      "onError": "continueErrorOutput",
+      "id": "7ac850ce-91b7-4b56-945b-aa25bbd3ece2",
+      "position": [
+        0,
+        520
+      ]
+    },
+    {
+      "name": "Prepare HR confirmation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "const r=$('Position state').first().json;const title=r.action==='Open'?'Position opened':r.existing?'Position closed':'No position found';const links=r.existing||($('Build job row').isExecuted?$('Build job row').first().json:{});return [{json:{to:r.config.hrEmail,subject:'BrightPath: '+title+' · '+r.jobId,message:title+'\\nJob ID: '+r.jobId+(r.action==='Open'?'\\nApply: '+(r.applyLink||links['Apply link'])+'\\nRefer: '+(r.referralLink||links['Referral link']):'\\n'+(r.reason||'')),body:{ok:true,jobId:r.jobId,result:title}}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "6c548af7-666c-4dbc-a580-76e70e64b4ca",
+      "position": [
+        260,
+        520
+      ]
+    },
+    {
+      "name": "Email position result",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.message }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "cNwkVHIKnkzKW0O8",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueErrorOutput",
+      "id": "c5d1f207-9fac-42c9-96bf-34b05c836889",
+      "position": [
+        520,
+        520
+      ]
+    },
+    {
+      "name": "Position response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:200,body:$('Prepare HR confirmation').first().json.body}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "4f4acde8-623e-4d49-947f-abd85d5878bd",
+      "position": [
+        780,
+        520
+      ]
+    },
+    {
+      "name": "Safe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:503,body:{ok:false,error:'service_unavailable',message:'The request could not be completed. Contact HR with this reference.',reference:$execution.id}}}];"
+      },
+      "id": "d7b75afe-db1e-4cdb-9e90-5ded365919a7",
+      "position": [
+        1040,
+        520
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body ?? $json }}",
+        "options": {
+          "responseCode": "={{ $json.status ?? 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "X-Content-Type-Options",
+                "value": "nosniff"
+              }
+            ]
+          }
+        }
+      },
+      "id": "505b0495-2fde-4a05-a50a-b759a4dfa8a6",
+      "position": [
+        1300,
+        520
+      ]
+    },
+    {
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "### Position management\nTrusted HR form relay opens/closes positions, creates CV folders and prefilled links, stores jobs and emails HR.\nInactive until setup/config.json and credentials are configured. See HANDOVER.md.",
+        "width": 1450,
+        "height": 180,
+        "color": 7
+      },
+      "id": "3fd5d7e1-1cf4-4904-9903-f6160ee2a2ae",
+      "position": [
+        0,
+        -220
+      ]
+    }
+  ],
+  "connections": {
+    "HR position request": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Validate HR action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate HR action": {
+      "main": [
+        [
+          {
+            "node": "Valid HR request?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid HR request?": {
+      "main": [
+        [
+          {
+            "node": "Find position",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find position": {
+      "main": [
+        [
+          {
+            "node": "Position state",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Position state": {
+      "main": [
+        [
+          {
+            "node": "Open action?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open action?": {
+      "main": [
+        [
+          {
+            "node": "Already opened?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Existing close ID?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already opened?": {
+      "main": [
+        [
+          {
+            "node": "Prepare HR confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create job CV folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create job CV folder": {
+      "main": [
+        [
+          {
+            "node": "Build job row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build job row": {
+      "main": [
+        [
+          {
+            "node": "Save new position",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save new position": {
+      "main": [
+        [
+          {
+            "node": "Prepare HR confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existing close ID?": {
+      "main": [
+        [
+          {
+            "node": "Close matching position",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare HR confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close matching position": {
+      "main": [
+        [
+          {
+            "node": "Prepare HR confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare HR confirmation": {
+      "main": [
+        [
+          {
+            "node": "Email position result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email position result": {
+      "main": [
+        [
+          {
+            "node": "Position response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Position response": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe failure": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "errorWorkflow": "BrightPathErrorsV1"
+  },
+  "tags": []
+}
