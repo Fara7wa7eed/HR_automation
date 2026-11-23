@@ -1,0 +1,18 @@
+{
+  "hrEmail": "CONFIGURE_HR_EMAIL",
+  "jobsSheetId": "CONFIGURE_JOBS_SHEET_ID",
+  "jobsTab": "Job Openings",
+  "candidatesSheetId": "CONFIGURE_CANDIDATES_SHEET_ID",
+  "candidatesTab": "Candidates",
+  "cvRootFolderId": "CONFIGURE_CV_ROOT_FOLDER_ID",
+  "applicationFormUrl": "CONFIGURE_APPLICATION_FORM_URL",
+  "applicationJobEntry": "CONFIGURE_APPLICATION_JOB_ENTRY",
+  "referralFormUrl": "CONFIGURE_REFERRAL_FORM_URL",
+  "referralJobEntry": "CONFIGURE_REFERRAL_JOB_ENTRY",
+  "portalOrigin": "http://localhost:8080",
+  "qdrantUrl": "CONFIGURE_QDRANT_URL_MATCH_CREDENTIAL",
+  "collection": "brightpath_handbook_v42_c88d0baabd49",
+  "handbookFileId": "1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0",
+  "handbookSha256": "c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6",
+  "leaveSheetId": "1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54"
+}

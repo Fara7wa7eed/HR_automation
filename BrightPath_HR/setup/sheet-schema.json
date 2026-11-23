@@ -1,0 +1,43 @@
+{
+  "jobs": [
+    "Job ID",
+    "Job title",
+    "Department",
+    "Required skills",
+    "Nice-to-have skills",
+    "Minimum experience",
+    "Description",
+    "Status",
+    "Apply link",
+    "Referral link",
+    "Created date",
+    "CV folder ID",
+    "Request ID",
+    "Close reason"
+  ],
+  "candidates": [
+    "Application ID",
+    "Job ID",
+    "Candidate name",
+    "Email",
+    "Phone",
+    "Source",
+    "Referrer name",
+    "Referrer email",
+    "Skills",
+    "Years of experience",
+    "Education",
+    "Current/last job",
+    "Languages",
+    "Score",
+    "Score reason",
+    "Priority",
+    "CV link",
+    "Application date",
+    "Notification status",
+    "AI extracted name",
+    "AI extracted email",
+    "AI extracted phone",
+    "Scoring evidence"
+  ]
+}

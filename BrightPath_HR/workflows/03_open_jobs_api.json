@@ -1,0 +1,236 @@
+{
+  "id": "BrightPathJobsV1",
+  "name": "BrightPath | Live open jobs",
+  "description": "Public GET returns only open positions and safe application/referral links; no candidate or internal scoring data.",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Jobs request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "hr-open-jobs",
+        "responseMode": "responseNode",
+        "authentication": "none",
+        "options": {
+          "allowedOrigins": "http://localhost:8080"
+        }
+      },
+      "webhookId": "hr-open-jobs",
+      "id": "28fed647-1b74-4687-a32a-ce6cfa7c781e",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { ...$json, config: {\"hrEmail\":\"CONFIGURE_HR_EMAIL\",\"jobsSheetId\":\"CONFIGURE_JOBS_SHEET_ID\",\"jobsTab\":\"Job Openings\",\"candidatesSheetId\":\"CONFIGURE_CANDIDATES_SHEET_ID\",\"candidatesTab\":\"Candidates\",\"cvRootFolderId\":\"CONFIGURE_CV_ROOT_FOLDER_ID\",\"applicationFormUrl\":\"CONFIGURE_APPLICATION_FORM_URL\",\"applicationJobEntry\":\"CONFIGURE_APPLICATION_JOB_ENTRY\",\"referralFormUrl\":\"CONFIGURE_REFERRAL_FORM_URL\",\"referralJobEntry\":\"CONFIGURE_REFERRAL_JOB_ENTRY\",\"portalOrigin\":\"http://localhost:8080\",\"qdrantUrl\":\"CONFIGURE_QDRANT_URL_MATCH_CREDENTIAL\",\"collection\":\"brightpath_handbook_v42_c88d0baabd49\",\"handbookFileId\":\"1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0\",\"handbookSha256\":\"c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6\",\"leaveSheetId\":\"1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54\"} } }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput",
+      "id": "61c5c4cb-0cea-4ac1-ac04-8c1dc1dccad6",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Read positions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "CONFIGURE_JOBS_SHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Job Openings"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SIQuldcVWHvlZjSt",
+          "name": "Google Sheets account"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput",
+      "id": "4f8efc8b-74a9-4fc5-8334-e9db34c0ee36",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Public open positions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\nconst jobs=$input.all().map(x=>x.json).filter(jobOpen).map(j=>({jobId:j['Job ID'],title:j['Job title'],department:j.Department,description:j.Description,applyLink:safeLink(j['Apply link']).href,referralLink:safeLink(j['Referral link']).href}));return [{json:{body:{ok:true,jobs},status:200}}];"
+      },
+      "onError": "continueErrorOutput",
+      "id": "45c0810d-3aad-4df9-954a-690908516d17",
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "name": "Safe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:503,body:{ok:false,error:'service_unavailable',message:'The request could not be completed. Contact HR with this reference.',reference:$execution.id}}}];"
+      },
+      "id": "97448250-87df-4279-ac7f-df9ce4e0052d",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body ?? $json }}",
+        "options": {
+          "responseCode": "={{ $json.status ?? 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "X-Content-Type-Options",
+                "value": "nosniff"
+              }
+            ]
+          }
+        }
+      },
+      "id": "8b1258e4-947a-4615-b73d-8ab33e5c3899",
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "### Live open jobs\nPublic GET returns only open positions and safe application/referral links; no candidate or internal scoring data.\nInactive until setup/config.json and credentials are configured. See HANDOVER.md.",
+        "width": 1450,
+        "height": 180,
+        "color": 7
+      },
+      "id": "8c58716a-e7f6-4883-8527-ad0bd7ac5f7c",
+      "position": [
+        0,
+        -220
+      ]
+    }
+  ],
+  "connections": {
+    "Jobs request": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Read positions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read positions": {
+      "main": [
+        [
+          {
+            "node": "Public open positions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Public open positions": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe failure": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "errorWorkflow": "BrightPathErrorsV1"
+  },
+  "tags": []
+}

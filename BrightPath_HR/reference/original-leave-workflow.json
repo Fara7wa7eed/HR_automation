@@ -1,0 +1,194 @@
+{
+  "name": "Annual Leave Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "annual-leave",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Leave Form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "annual-leave"
+    },
+    {
+      "parameters": {
+        "operation": "lookup",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Employees",
+          "mode": "name"
+        },
+        "lookupColumn": "Employee",
+        "lookupValue": "={{ $json.Employee }}"
+      },
+      "id": "2",
+      "name": "Get Employee",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "coerce"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ Number($json['Remaining Leave']) }}",
+              "rightValue": "={{ Number($('Leave Form').item.json['Leave Days']) }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "3",
+      "name": "Enough Leave?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const requested = Number($('Leave Form').item.json['Leave Days']);\nconst remaining = Number($json['Remaining Leave']);\n\nreturn [{\n  json: {\n    Employee: $json.Employee,\n    Email: $json.Email,\n    Status: 'Approved',\n    RequestedDays: requested,\n    RemainingLeave: remaining - requested\n  }\n}];"
+      },
+      "id": "4",
+      "name": "Approve Leave",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Employees",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Employee": "={{ $json.Employee }}",
+            "Email": "={{ $json.Email }}",
+            "Remaining Leave": "={{ $json.RemainingLeave }}"
+          },
+          "matchingColumns": [
+            "Employee"
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Update Leave Balance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1000,
+        150
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    Employee: $('Get Employee').item.json.Employee,\n    Email: $('Get Employee').item.json.Email,\n    Status: 'Rejected',\n    Message: 'Leave request rejected because there are not enough remaining leave days.'\n  }\n}];"
+      },
+      "id": "6",
+      "name": "Reject Leave",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        450
+      ]
+    }
+  ],
+  "connections": {
+    "Leave Form": {
+      "main": [
+        [
+          {
+            "node": "Get Employee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Employee": {
+      "main": [
+        [
+          {
+            "node": "Enough Leave?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enough Leave?": {
+      "main": [
+        [
+          {
+            "node": "Approve Leave",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Leave",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approve Leave": {
+      "main": [
+        [
+          {
+            "node": "Update Leave Balance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

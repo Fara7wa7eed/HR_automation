@@ -1,0 +1,11 @@
+{
+  "name": "brightpath-hr-portal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=server/.env server/server.mjs",
+    "test": "node --test tests/*.test.*"
+  },
+  "engines": {"node": ">=22.9"}
+}

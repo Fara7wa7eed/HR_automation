@@ -1,0 +1,248 @@
+{
+  "id": "BrightPathIntakeReferral",
+  "name": "BrightPath | Referral application intake",
+  "description": "Validates referral form submissions and calls the shared screening subworkflow with a fixed source.",
+  "active": false,
+  "nodes": [
+    {
+      "name": "Application request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "brightpath-apply-referral",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth",
+        "options": {
+          "allowedOrigins": "http://localhost:8080"
+        }
+      },
+      "webhookId": "brightpath-apply-referral",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CONFIGURE_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "BrightPath Webhook Access"
+        }
+      },
+      "id": "efa728c8-09fd-442b-a280-d5ad3ec59209",
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "Normalize application",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\ntry{return [{json:normalizeApplication($json.body||{},'Referral')}];}catch(e){return [{json:{status:400,body:{ok:false,error:'invalid_application',message:e.message}}}];}"
+      },
+      "onError": "continueErrorOutput",
+      "id": "2774f8a1-c41e-4e38-ba53-e723cf6a3910",
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "name": "Valid application?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition",
+              "leftValue": "={{ !$json.status }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c4f4d1be-e9ab-47e3-a3b2-dafdbfdcad05",
+      "position": [
+        520,
+        0
+      ]
+    },
+    {
+      "name": "Shared CV screening",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "BrightPathScreenV1"
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "onError": "continueErrorOutput",
+      "id": "57b21595-cb5a-4591-9dc1-c74a22b7374b",
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "name": "Safe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "parameters": {
+        "jsCode": "return [{json:{status:503,body:{ok:false,error:'service_unavailable',message:'The request could not be completed. Contact HR with this reference.',reference:$execution.id}}}];"
+      },
+      "id": "93379817-bb51-435e-af08-f07239c8531e",
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.body ?? $json }}",
+        "options": {
+          "responseCode": "={{ $json.status ?? 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "X-Content-Type-Options",
+                "value": "nosniff"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d3cc9bcb-992d-45af-8e62-f792a8568be6",
+      "position": [
+        1300,
+        0
+      ]
+    },
+    {
+      "name": "Read me",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "parameters": {
+        "content": "### Referral application intake\nValidates referral form submissions and calls the shared screening subworkflow with a fixed source.\nInactive until setup/config.json and credentials are configured. See HANDOVER.md.",
+        "width": 1450,
+        "height": 180,
+        "color": 7
+      },
+      "id": "43a424e6-18c8-4456-a9d3-52eb4229954e",
+      "position": [
+        0,
+        -220
+      ]
+    }
+  ],
+  "connections": {
+    "Application request": {
+      "main": [
+        [
+          {
+            "node": "Normalize application",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize application": {
+      "main": [
+        [
+          {
+            "node": "Valid application?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid application?": {
+      "main": [
+        [
+          {
+            "node": "Shared CV screening",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shared CV screening": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Safe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Safe failure": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "executionTimeout": 180,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none",
+    "saveManualExecutions": false,
+    "errorWorkflow": "BrightPathErrorsV1"
+  },
+  "tags": []
+}
