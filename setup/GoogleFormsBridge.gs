@@ -31,7 +31,7 @@ function bpEntry(form){const item=form.getItems(FormApp.ItemType.TEXT).map(x=>x.
 function bpVerifyIdentityForm(id){
  // A respondent-entered email is not an HR identity. Require Google's VERIFIED setting.
  const response=UrlFetchApp.fetch('https://forms.googleapis.com/v1/forms/'+encodeURIComponent(id),{headers:{Authorization:'Bearer '+ScriptApp.getOAuthToken()},muteHttpExceptions:true});
- if(response.getResponseCode()!==200)throw Error('Enable Google Forms API and authorize forms.body.readonly before enabling the bridge');
+ if(response.getResponseCode()!==200){let message='Google Forms API request failed';try{message=JSON.parse(response.getContentText()).error?.message||message;}catch{}throw Error('Google Forms API HTTP '+response.getResponseCode()+': '+message);}
  const form=JSON.parse(response.getContentText());if(form.settings?.emailCollectionType!=='VERIFIED')throw Error('Set Collect email addresses to Verified in the HR and referral forms');
 }
 function finalizeSetup(){

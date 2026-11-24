@@ -14,13 +14,13 @@
         "responseMode": "responseNode",
         "authentication": "headerAuth",
         "options": {
-          "allowedOrigins": "http://localhost:8080"
+          "allowedOrigins": "https://fara7wa7eed.github.io"
         }
       },
       "webhookId": "brightpath-apply-external",
       "credentials": {
         "httpHeaderAuth": {
-          "id": "CONFIGURE_HEADER_AUTH_CREDENTIAL_ID",
+          "id": "FwZphDVSqWGZPGI4",
           "name": "BrightPath Webhook Access"
         }
       },

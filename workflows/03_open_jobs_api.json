@@ -14,7 +14,7 @@
         "responseMode": "responseNode",
         "authentication": "none",
         "options": {
-          "allowedOrigins": "http://localhost:8080"
+          "allowedOrigins": "https://fara7wa7eed.github.io"
         }
       },
       "webhookId": "hr-open-jobs",
@@ -30,7 +30,7 @@
       "typeVersion": 3.4,
       "parameters": {
         "mode": "raw",
-        "jsonOutput": "={{ { ...$json, config: {\"hrEmail\":\"CONFIGURE_HR_EMAIL\",\"jobsSheetId\":\"CONFIGURE_JOBS_SHEET_ID\",\"jobsTab\":\"Job Openings\",\"candidatesSheetId\":\"CONFIGURE_CANDIDATES_SHEET_ID\",\"candidatesTab\":\"Candidates\",\"cvRootFolderId\":\"CONFIGURE_CV_ROOT_FOLDER_ID\",\"applicationFormUrl\":\"CONFIGURE_APPLICATION_FORM_URL\",\"applicationJobEntry\":\"CONFIGURE_APPLICATION_JOB_ENTRY\",\"referralFormUrl\":\"CONFIGURE_REFERRAL_FORM_URL\",\"referralJobEntry\":\"CONFIGURE_REFERRAL_JOB_ENTRY\",\"portalOrigin\":\"http://localhost:8080\",\"qdrantUrl\":\"CONFIGURE_QDRANT_URL_MATCH_CREDENTIAL\",\"collection\":\"brightpath_handbook_v42_c88d0baabd49\",\"handbookFileId\":\"1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0\",\"handbookSha256\":\"c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6\",\"leaveSheetId\":\"1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54\"} } }}",
+        "jsonOutput": "={{ { ...$json, config: {\"hrEmail\":\"farah.wa7eed@gmail.com\",\"jobsSheetId\":\"1nVWzAmz0WdGSgM7vCV7LQ5dpMIdUJcqNz9yJz9e9O0Y\",\"jobsTab\":\"Job Openings\",\"candidatesSheetId\":\"1TuwcFBGhgzJCT2iXnTM_9olNzBSx0-FtQfDx3v403KA\",\"candidatesTab\":\"Candidates\",\"cvRootFolderId\":\"1uG0ZvSYtab0XCtgTbUlv9Rk9txDgyBZ9\",\"applicationFormUrl\":\"https://docs.google.com/forms/d/e/1FAIpQLSfza7HBu2lDtC5F7aFWdIMghL2-eW2AkfZKxpu56Ql0EiYm-w/viewform\",\"applicationJobEntry\":\"entry.284884436\",\"referralFormUrl\":\"https://docs.google.com/forms/d/e/1FAIpQLSdWLUGeXRFSS5a-G4Si0FPZz3FIo4iT-cNhz5o27w6S-wCkwQ/viewform\",\"referralJobEntry\":\"entry.689311202\",\"portalOrigin\":\"https://fara7wa7eed.github.io\",\"qdrantUrl\":\"https://7e885167-3959-4bfa-aceb-2ed587362146.us-east-1-1.aws.cloud.qdrant.io\",\"collection\":\"brightpath_handbook_v42_c88d0baabd49\",\"handbookFileId\":\"1ZDkbcuwpWG1MEKsD3zc775_hU8-bUad0\",\"handbookSha256\":\"c88d0baabd496886d64425309fad2f73958b738df58cd8d99f0d73a8dfc842c6\",\"leaveSheetId\":\"1xkt1O_iIgjrF5NZjXw21-1SweXUB5jCHgduqkvnho54\"} } }}",
         "options": {}
       },
       "onError": "continueErrorOutput",
@@ -50,7 +50,7 @@
         "documentId": {
           "__rl": true,
           "mode": "id",
-          "value": "CONFIGURE_JOBS_SHEET_ID"
+          "value": "1nVWzAmz0WdGSgM7vCV7LQ5dpMIdUJcqNz9yJz9e9O0Y"
         },
         "sheetName": {
           "__rl": true,

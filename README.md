@@ -1,6 +1,6 @@
 # BrightPath HR
 
-The project files are ready for configuration and GitHub upload. The chatbot was tested against the uploaded handbook in the connected Qdrant/Gemini setup. Google Forms, recruitment storage, and email still need the account connections listed in **SETUP.md** before the full system can go live.
+Google Forms, recruitment workbooks, CV storage, and credential references are configured. The live jobs API and authenticated handbook chatbot have passed HTTPS gateway checks. The frontend currently uses a temporary gateway tunnel that depends on the local computer and Docker remaining running. Permanent HTTPS hosting, recruitment acceptance checks, and actual employee leave mappings are still required before calling the full system production-ready. See **context/CURRENT_STATE.md** for the current deployment status and **SETUP.md** for the setup procedure.
 
 Start with **SETUP.md**, then use **TEST_REPORT.md** for the verified results and remaining acceptance checks.
 
