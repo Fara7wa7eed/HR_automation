@@ -224,7 +224,7 @@
         "name": "={{ $json.jobId }}",
         "driveId": {
           "__rl": true,
-          "mode": "id",
+          "mode": "list",
           "value": "My Drive"
         },
         "folderId": {

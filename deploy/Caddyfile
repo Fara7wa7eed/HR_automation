@@ -1,0 +1,13 @@
+{
+    email {$TLS_EMAIL}
+}
+
+{$GATEWAY_DOMAIN} {
+    @integration path /api/* /webhook/*
+    handle @integration {
+        reverse_proxy gateway:8080
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

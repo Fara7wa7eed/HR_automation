@@ -1,6 +1,29 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('fs'),path=require('path'),vm=require('vm');
 const r=require('./rules.cjs');const root=path.resolve(__dirname,'..');
 test('priority boundaries: only 75 and above qualify for HR email',()=>{for(const [n,p]of [[0,'Low'],[49,'Low'],[49.99,'Low'],[50,'Medium'],[74,'Medium'],[74.99,'Medium'],[75,'High'],[100,'High']])assert.equal(r.score(n).priority,p);});
+test('High candidate notification renders a valid multiline message',()=>{
+ const w=JSON.parse(fs.readFileSync(path.join(root,'workflows/07_shared_cv_screening.json')));
+ const template=w.nodes.find(n=>n.name==='Email High candidate').parameters.message;
+ const render=new Function('$json','return ('+template.slice(3,-2).trim()+');');
+ const body=render({'Candidate name':'Synthetic Candidate',Source:'External',Score:100,'Score reason':'Required skills demonstrated.',Skills:'Python','Years of experience':8,'CV link':'https://drive.google.com/file/d/synthetic/view'});
+ assert.match(body,/Candidate: Synthetic Candidate\nSource: External\nScore: 100/);
+ assert.match(body,/CV: https:\/\/drive\.google\.com\/file\/d\/synthetic\/view/);
+ assert.match(body,/HR should review the evidence/);
+});
+test('Gemini scoring adapter validates generated JSON before candidate storage',async()=>{
+ const w=JSON.parse(fs.readFileSync(path.join(root,'workflows/07_shared_cv_screening.json')));
+ const script=w.nodes.find(n=>n.name==='Validate AI score').parameters.jsCode;
+ const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+ const validate=new AsyncFunction('$',script);
+ const ai={name:'Synthetic Candidate',email:'',phone:'',skills:['Python'],languages:['English'],yearsExperience:8,education:'Synthetic degree',currentJob:'Automation Engineer',reason:'Required skills demonstrated.',score:100,requiredSkillsScore:60,experienceScore:25,niceSkillsScore:15,evidence:{}};
+ const lookup=response=>name=>{assert.equal(name,'Analyze and score CV');return {first:()=>({json:response})};};
+ const response={candidates:[{content:{parts:[{text:JSON.stringify(ai)}]}}]};
+ const result=await validate(lookup(response));
+ assert.equal(result[0].json.priority,'High');
+ assert.equal(result[0].json.score,100);
+ await assert.rejects(validate(lookup({candidates:[]})));
+ await assert.rejects(validate(lookup({candidates:[{content:{parts:[{text:JSON.stringify({...ai,score:99})}]}}]})),/Score does not equal components/);
+});
 test('invalid AI scores fail closed instead of coercing or clamping',()=>{for(const n of [-1,101,NaN,Infinity,null,'75',{},undefined])assert.throws(()=>r.score(n));});
 test('missing and closed jobs are rejected',()=>{for(const j of [undefined,null,{}, {Status:'Closed'},{Status:'open'},{Status:'Open ' }])assert.equal(r.jobOpen(j),false);assert.equal(r.jobOpen({Status:'Open'}),true);});
 test('prefilled Forms links encode ID and preserve unrelated fields',()=>{let u=new URL(r.prefill('https://docs.google.com/forms/d/e/test/viewform?entry.9=existing','entry.123','JOB-abc_DEF'));assert.equal(u.searchParams.get('entry.123'),'JOB-abc_DEF');assert.equal(u.searchParams.get('entry.9'),'existing');assert.throws(()=>r.prefill('javascript:alert(1)','entry.1','JOB-1'));assert.throws(()=>r.prefill('https://evil.example/form','entry.1','JOB-1'));assert.throws(()=>r.prefill('https://docs.google.com/forms/d/e/test/viewform','not-entry','JOB-1'));});

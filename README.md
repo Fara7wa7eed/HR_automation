@@ -1,6 +1,6 @@
 # BrightPath HR
 
-Google Forms, recruitment workbooks, CV storage, and credential references are configured. The live jobs API and authenticated handbook chatbot have passed HTTPS gateway checks. The frontend currently uses a temporary gateway tunnel that depends on the local computer and Docker remaining running. Permanent HTTPS hosting, recruitment acceptance checks, and actual employee leave mappings are still required before calling the full system production-ready. See **context/CURRENT_STATE.md** for the current deployment status and **SETUP.md** for the setup procedure.
+Google Forms, recruitment workbooks, CV storage, and credential references are configured. The live jobs API and authenticated handbook chatbot have passed HTTPS gateway checks. A synthetic recruitment test verified position opening/closing, CV extraction and storage, candidate saving, HR email, replay protection, and closed-position guards. The final referral scoring check is limited by Gemini's reported high demand. The frontend currently uses a temporary gateway tunnel that depends on the local computer and Docker remaining running. Permanent HTTPS hosting and actual employee leave mappings are still required before calling the full system production-ready. See **context/CURRENT_STATE.md** for status, **SETUP.md** for setup, and **deploy/README.md** for the prepared always-on server stack.
 
 Start with **SETUP.md**, then use **TEST_REPORT.md** for the verified results and remaining acceptance checks.
 
@@ -13,6 +13,7 @@ Start with **SETUP.md**, then use **TEST_REPORT.md** for the verified results an
 | `server/` | Private integration gateway; passwords and webhook keys stay outside the website |
 | `setup/` | Google Forms/Sheets/Drive setup bridge, configuration and import helpers |
 | `tests/` | Business-rule and HTTP integration tests using simulated external services |
+| `deploy/` | Prepared Docker Compose stack for an always-on server with HTTPS and a private n8n editor |
 | `reference/` | Unmodified original workflow JSONs for comparison |
 | `.github/workflows/pages.yml` | GitHub Pages deployment of `portal/` only |
 

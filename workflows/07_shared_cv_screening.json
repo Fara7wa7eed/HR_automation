@@ -315,7 +315,7 @@
         "name": "={{ $('Screen application').first().json.name.replace(/[^a-zA-Z0-9 _-]/g,'_')+'_'+$('Screen application').first().json.applicationId }}",
         "driveId": {
           "__rl": true,
-          "mode": "id",
+          "mode": "list",
           "value": "My Drive"
         },
         "folderId": {
@@ -363,7 +363,7 @@
         "name": "CV.pdf",
         "driveId": {
           "__rl": true,
-          "mode": "id",
+          "mode": "list",
           "value": "My Drive"
         },
         "folderId": {
@@ -436,48 +436,43 @@
     },
     {
       "name": "Analyze and score CV",
-      "type": "@n8n/n8n-nodes-langchain.chainLlm",
-      "typeVersion": 1.9,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
       "parameters": {
-        "promptType": "define",
-        "text": "={{ $json.prompt }}",
-        "batching": {}
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ { contents: [{ role: 'user', parts: [{ text: $('Build screening prompt').first().json.prompt }] }], generationConfig: { temperature: 0, maxOutputTokens: 2048, responseMimeType: 'application/json' } } }}",
+        "options": {
+          "timeout": 30000
+        }
       },
       "onError": "continueErrorOutput",
       "id": "a90a008f-245c-4f8e-b72d-f06a8d113210",
       "position": [
         260,
         780
-      ]
-    },
-    {
-      "parameters": {
-        "modelName": "models/gemini-flash-lite-latest",
-        "options": {
-          "temperature": 0
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
-      "typeVersion": 1.2,
-      "name": "Gemini",
+      ],
       "credentials": {
         "googlePalmApi": {
           "id": "NjhvIKbdtVr0Cl03",
           "name": "Google Gemini(PaLM) Api account"
         }
       },
-      "id": "1d251037-8854-4ef6-9ac0-0a1c2e7dccb6",
-      "position": [
-        520,
-        780
-      ]
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1000
     },
     {
       "name": "Validate AI score",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "parameters": {
-        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\nconst ai=parseAI($json.text);for(const [k,max] of [['requiredSkillsScore',60],['experienceScore',25],['niceSkillsScore',15]])if(typeof ai[k]!=='number'||!Number.isFinite(ai[k])||ai[k]<0||ai[k]>max)throw Error('Invalid scoring component');if(Math.abs(ai.score-ai.requiredSkillsScore-ai.experienceScore-ai.niceSkillsScore)>0.01)throw Error('Score does not equal components');return [{json:{ai,...score(ai.score)}}];"
+        "jsCode": "\nfunction text(v,max=500){return typeof v==='string'?v.trim().slice(0,max):'';}\nfunction email(v){let s=text(v,254).toLowerCase();if(!/^[^\\s@<>]+@[^\\s@<>]+\\.[^\\s@<>]+$/.test(s)||/[\\r\\n]/.test(v||''))throw Error('A valid email is required');return s;}\nfunction need(v,label,max=500){let s=text(v,max);if(!s)throw Error(label+' is required');return s;}\nfunction configured(c,keys){for(let k of keys)if(!c[k]||String(c[k]).includes('CONFIGURE_'))throw Error('Missing configuration: '+k);}\nfunction score(v){if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>100)throw Error('AI score must be a number from 0 to 100');return {score:v,priority:v>=75?'High':v>=50?'Medium':'Low'};}\nfunction jobOpen(j){return !!j&&j.Status==='Open';}\nfunction isoDate(v){if(typeof v!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(v))throw Error('Valid leave dates are required');const d=new Date(v+'T12:00:00Z');if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==v)throw Error('Valid leave dates are required');return v;}\nfunction safeLink(s){let v=need(s,'Form URL',2048);if(!/^https:\\/\\/docs\\.google\\.com\\/forms\\/d\\/(?:e\\/)?[A-Za-z0-9_-]+\\/viewform(?:\\?[^\\s<>#]*)?(?:#[^\\s<>]*)?$/.test(v))throw Error('Use the full HTTPS Google Forms viewform URL');return {href:v};}\nfunction prefill(url,entry,id){let v=safeLink(url).href;if(!/^entry\\.\\d+$/.test(entry))throw Error('Invalid Google Forms Job ID entry');let [withoutFragment,fragment]=v.split('#');let [base,query='']=withoutFragment.split('?');let parts=query.split('&').filter(Boolean).filter(p=>![entry,'usp'].includes(decodeURIComponent(p.split('=')[0])));parts.push('usp=pp_url',entry+'='+encodeURIComponent(id));return base+'?'+parts.join('&')+(fragment?'#'+fragment:'');}\nfunction parseAI(s){if(typeof s!=='string')throw Error('AI returned no JSON');let o=JSON.parse(s.replace(/^\\s*\\x60{3}(?:json)?\\s*/,'').replace(/\\s*\\x60{3}\\s*$/,''));score(o.score);for(let k of ['name','email','phone','education','currentJob','reason'])if(typeof o[k]!=='string')throw Error('Invalid AI field: '+k);if(!Array.isArray(o.skills)||!Array.isArray(o.languages)||!o.skills.every(x=>typeof x==='string')||!o.languages.every(x=>typeof x==='string')||typeof o.yearsExperience!=='number'||!Number.isFinite(o.yearsExperience)||o.yearsExperience<0||o.yearsExperience>80)throw Error('Invalid extracted CV fields');if(!text(o.reason))throw Error('AI scoring reason is required');return o;}\nfunction normalizeApplication(b,source){let a={applicationId:need(b.applicationId,'Application ID',200),jobId:need(b.jobId,'Job ID',220),name:need(b.name,'Name',120),email:email(b.email),phone:need(b.phone,'Phone',40),cvFileId:need(b.cvFileId,'CV file ID',200),source,referrerName:'',referrerEmail:'',applicationDate:new Date().toISOString()};if(!/^[A-Za-z0-9_-]{8,200}$/.test(a.cvFileId)||!/^JOB-[A-Za-z0-9_-]{1,210}$/.test(a.jobId)||!/^[-\\w]{8,200}$/.test(a.applicationId))throw Error('Invalid identifier');if(source==='Referral'){a.referrerName=need(b.referrerName,'Referrer name',120);a.referrerEmail=email(b.referrerEmail);}return a;}\nfunction leaveDecision(b,e){let days=Number(b.days),remaining=Number(e?.['Remaining Leave']);if(!Number.isInteger(days)||days<1||days>15)throw Error('Days must be a whole number between 1 and 15');if(!e||!e['Employee ID'])throw Error('Employee not found');if(!Number.isFinite(remaining)||remaining<0)throw Error('Invalid leave balance');return {days,remaining,eligible:remaining>=days};}\n\nconst ai=parseAI(($('Analyze and score CV').first().json.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join(''));for(const [k,max] of [['requiredSkillsScore',60],['experienceScore',25],['niceSkillsScore',15]])if(typeof ai[k]!=='number'||!Number.isFinite(ai[k])||ai[k]<0||ai[k]>max)throw Error('Invalid scoring component');if(Math.abs(ai.score-ai.requiredSkillsScore-ai.experienceScore-ai.niceSkillsScore)>0.01)throw Error('Score does not equal components');return [{json:{ai,...score(ai.score)}}];"
       },
       "onError": "continueErrorOutput",
       "id": "e6387990-c1e3-442e-84db-28e7b4eb18a2",
@@ -917,7 +912,7 @@
         "sendTo": "={{ $('Configuration').first().json.config.hrEmail }}",
         "subject": "={{ 'High priority candidate · '+$json['Job ID'] }}",
         "emailType": "text",
-        "message": "={{ 'Candidate: '+$json['Candidate name']+'\nSource: '+$json.Source+'\nScore: '+$json.Score+'\nReason: '+$json['Score reason']+'\nSkills: '+$json.Skills+'\nExperience: '+$json['Years of experience']+'\nCV: '+$json['CV link']+'\nAI-assisted screening; HR should review the evidence.' }}",
+        "message": "={{ 'Candidate: '+$json['Candidate name']+'\\nSource: '+$json.Source+'\\nScore: '+$json.Score+'\\nReason: '+$json['Score reason']+'\\nSkills: '+$json.Skills+'\\nExperience: '+$json['Years of experience']+'\\nCV: '+$json['CV link']+'\\nAI-assisted screening; HR should review the evidence.' }}",
         "options": {
           "appendAttribution": false
         }
@@ -1356,17 +1351,6 @@
           {
             "node": "Safe failure",
             "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Gemini": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "Analyze and score CV",
-            "type": "ai_languageModel",
             "index": 0
           }
         ]
